@@ -1,0 +1,43 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "resident-server-template",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-03-02",
+  "compatibility_flags": ["nodejs_compat"],
+  // The device whose review queue we poll and push to, and the relay it's
+  // connected to (the hosted resident relay, whose TLS root the firmware trusts).
+  "vars": {
+    "DEVICE_ID": "70c2d51d",
+    "RELAY_BASE": "https://resident.inanimate.tech"
+  },
+  // Poll GitHub every 2 minutes during work hours only: 07:00-18:00 UTC,
+  // Mon-Fri (cron runs in UTC). See scheduled() in src/worker.ts.
+  "triggers": {
+    "crons": ["*/2 7-17 * * 1-5"]
+  },
+  // Import device-apps/*.lua into the worker as text strings.
+  "rules": [
+    {
+      "type": "Text",
+      "globs": ["**/*.lua"],
+      "fallthrough": true
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "class_name": "DeviceAgent",
+        "name": "DeviceAgent"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "new_sqlite_classes": ["DeviceAgent"],
+      "tag": "v1"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}
