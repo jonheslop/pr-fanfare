@@ -7,8 +7,8 @@ if type(PR_COUNT) == "number" then
   data, count, beep = PR_DATA, PR_COUNT, PR_BEEP
 else
   data = {
-    { n = 101, t = "Add retry logic to the chunked uploader path", r = "acme/api" },
-    { n = 98,  t = "Fix flaky clock test on CI",                   r = "acme/web" },
+    { n = 101, t = "Add retry logic to the chunked uploader path", r = "acme/api", a = "octocat", adds = 260, dels = 32 },
+    { n = 98,  t = "Fix flaky clock test on CI",                   r = "acme/web", a = "hubot",   adds = 14,  dels = 9 },
   }
   count, beep = 2, false
 end
@@ -57,6 +57,17 @@ local function wrap(s, perline, maxlines)
   return lines
 end
 
+-- Largest text size (capped at maxsize) at which s fits in maxw px. The base
+-- font is 6px wide per char at size 1, so a char is 6*size px wide.
+local function fit_size(s, maxw, maxsize)
+  local n = #s
+  if n == 0 then return maxsize end
+  local sz = math.floor(maxw / (n * 6))
+  if sz > maxsize then sz = maxsize end
+  if sz < 1 then sz = 1 end
+  return sz
+end
+
 -- A ◕ "eye": a filled circle with one upper quadrant notched out. The TFT has
 -- no circle primitive, so fill row-by-row (half-width sqrt(r^2 - dy^2)); on the
 -- upper rows we keep only one half, leaving the opposite upper quarter bare.
@@ -67,7 +78,7 @@ local function eye(cx, cy, r, red, grn, blu, notch_right)
     if dy < 0 and notch_right then
       screen.fill_rect(cx - dx, cy + dy, dx + 1, 1, red, grn, blu) -- left half only
     elseif dy < 0 then
-      screen.fill_rect(cx, cy + dy, dx + 1, 1, red, grn, blu) -- right half only
+      screen.fill_rect(cx, cy + dy, dx + 1, 1, red, grn, blu)      -- right half only
     else
       screen.fill_rect(cx - dx, cy + dy, dx * 2 + 1, 1, red, grn, blu)
     end
@@ -109,10 +120,10 @@ end
 -- ｡◕‿◕｡ — drawn when the review queue is empty: two round eyes, a smile, and
 -- a pair of outlined cheeks.
 local function draw_face()
-  circle(62, 70, 7, 235, 235, 235)         -- left cheek (outline)
-  circle(178, 70, 7, 235, 235, 235)        -- right cheek
-  eye(90, 54, 14, 235, 235, 235, true)     -- left eye  (notch faces inward, upper-right)
-  eye(150, 54, 14, 235, 235, 235)          -- right eye (notch faces inward, upper-left)
+  circle(62, 70, 7, 235, 235, 235)     -- left cheek (outline)
+  circle(178, 70, 7, 235, 235, 235)    -- right cheek
+  eye(90, 54, 14, 235, 235, 235, true) -- left eye  (notch faces inward, upper-right)
+  eye(150, 54, 14, 235, 235, 235)      -- right eye (notch faces inward, upper-left)
   draw_smile(120, 77, 13, 6, 235, 235, 235)
 end
 
@@ -126,32 +137,57 @@ local function draw()
     return
   end
 
-  -- Header: big count + label.
-  screen.text(8, 8, tostring(count), 4, 255, 190, 0)
-  local cx = 8 + #tostring(count) * 24 + 12
-  screen.text(cx, 10, count == 1 and "PR" or "PRs", 2, 235, 235, 235)
-  screen.text(cx, 30, "to review", 1, 170, 170, 170)
-  screen.line(0, 52, 240, 52, 70, 70, 70)
+  -- Status column (left): the count headline stacked vertically so it claims a
+  -- narrow strip instead of a full-width band. Big number / "PRs" / "to review"
+  local SX = 6   -- left padding of the column
+  local DIV = 64 -- vertical divider between column + content
+  local cn = tostring(count)
+  screen.text(SX, 8, cn, #cn >= 3 and 3 or 4, 255, 190, 0)
+  screen.text(SX, 48, count == 1 and "PR" or "PRs", 2, 235, 235, 235)
+  screen.text(SX, 68, "to review", 1, 170, 170, 170)
+  screen.line(DIV, 0, DIV, 135, 70, 70, 70)
 
-  -- Current PR card.
+  -- Content column (right), stacked: repo, author, big PR number, title.
+  local CX = DIV + 8  -- content left edge (72)
+  local CW = 240 - CX -- content width (168)
   local pr = data[cur]
   if pr then
-    -- Show just the repo name, dropping any "org/" prefix.
-    local repo = (pr.r or ""):match("[^/]+$") or ""
-    local head = "#" .. tostring(pr.n) .. "  " .. repo
-    screen.text(6, 56, string.sub(head, 1, 38), 1, 0, 230, 90)
-    local lines = wrap(pr.t, 18, 2)
+    -- Repo (green) and author (cyan) each on their own line above the number.
+    local repo = string.sub((pr.r or ""):match("[^/]+$") or "", 1, 26)
+    screen.text(CX, 4, repo, 1, 0, 230, 90)
+    local author = pr.a or ""
+    if author ~= "" then
+      screen.text(CX, 16, "@" .. string.sub(author, 1, 12), 2, 255, 140, 0)
+    end
+
+    -- Big PR number — the value you type into `gh`. Left-aligned at size 4,
+    -- shrinking only if an unusually long number would overflow the column.
+    local num = "#" .. tostring(pr.n)
+    local nsize = fit_size(num, CW, 4)
+    screen.text(CX, 40, num, nsize, 255, 255, 255)
+
+    -- Title: smaller, wrapped to the content width (~28 chars/line).
+    local lines = wrap(pr.t, math.floor(CW / 6), 3)
+    local ty = 40 + nsize * 8 + 8
     for idx = 1, #lines do
-      screen.text(6, 52 + idx * 19, lines[idx], 2, 235, 235, 235)
+      screen.text(CX, ty + (idx - 1) * 11, lines[idx], 1, 205, 205, 205)
     end
   end
 
-  -- Footer: position, overflow, hint.
-  screen.text(6, 118, tostring(cur) .. "/" .. tostring(#data), 1, 150, 150, 150)
+  -- Footer (content column): position, overflow, and the PR's line diff
+  -- (+adds in green, -dels in red), right-aligned where the hint used to be.
+  screen.text(CX, 124, tostring(cur) .. "/" .. tostring(#data), 1, 150, 150, 150)
   if count > #data then
-    screen.text(56, 118, "+" .. tostring(count - #data) .. " more", 1, 150, 150, 150)
+    screen.text(CX + 42, 124, "+" .. tostring(count - #data) .. " more", 1, 150, 150, 150)
   end
-  screen.text(150, 118, "BTN0 next", 1, 150, 150, 150)
+  if pr and (pr.adds or -1) >= 0 and (pr.dels or -1) >= 0 then
+    local plus = "+" .. tostring(pr.adds)
+    local minus = "-" .. tostring(pr.dels)
+    local mx = 240 - #minus * 6     -- minus hugs the right edge
+    local px = mx - (#plus + 1) * 6 -- plus sits to its left, one space gap
+    screen.text(px, 124, plus, 1, 0, 220, 90)
+    screen.text(mx, 124, minus, 1, 235, 60, 60)
+  end
   screen.flip()
 end
 

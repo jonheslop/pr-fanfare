@@ -4,7 +4,35 @@ import { getAgentByName } from "agents"
 // We prepend PR_DATA / PR_COUNT / PR_BEEP to it before pushing to the device.
 import APP_BODY from "../device-apps/pr-review.lua"
 
-type PR = { num: number; title: string; repo: string }
+type PR = {
+  num: number
+  title: string
+  repo: string
+  author: string
+  // Line diff. -1 means "unknown" (fetch failed) — the device hides the diff.
+  adds: number
+  dels: number
+}
+
+const ghHeaders = (token: string) => ({
+  Authorization: `Bearer ${token}`,
+  Accept: "application/vnd.github+json",
+  "X-GitHub-Api-Version": "2022-11-28",
+  "User-Agent": "resident-pr-review",
+})
+
+// The search API doesn't carry additions/deletions, so fetch the PR resource
+// per item. Best-effort: returns -1/-1 if the PR can't be fetched.
+async function fetchDiff(url: string, token: string): Promise<{ adds: number; dels: number }> {
+  try {
+    const r = await fetch(url, { headers: ghHeaders(token) })
+    if (!r.ok) return { adds: -1, dels: -1 }
+    const d = (await r.json()) as { additions?: number; deletions?: number }
+    return { adds: d.additions ?? -1, dels: d.deletions ?? -1 }
+  } catch {
+    return { adds: -1, dels: -1 }
+  }
+}
 
 // Re-push at least this often so a rebooted device repaints even when the
 // queue hasn't changed. last_push_ms only advances on a successful (200) relay
@@ -29,26 +57,35 @@ async function fetchReviewQueue(token: string): Promise<{ prs: PR[]; count: numb
   const url =
     `https://api.github.com/search/issues?q=${encodeURIComponent(q)}` +
     `&per_page=20&sort=created&order=desc`
-  const res = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28",
-      "User-Agent": "resident-pr-review",
-    },
-  })
+  const res = await fetch(url, { headers: ghHeaders(token) })
   if (!res.ok) {
     throw new Error(`GitHub search ${res.status}: ${await res.text()}`)
   }
   const json = (await res.json()) as {
     total_count: number
-    items: Array<{ number: number; title: string; repository_url: string }>
+    items: Array<{
+      number: number
+      title: string
+      repository_url: string
+      user?: { login?: string } | null
+      pull_request?: { url?: string } | null
+    }>
   }
-  const prs = json.items.slice(0, 12).map((it) => ({
-    num: it.number,
-    title: it.title ?? "",
-    repo: (it.repository_url ?? "").split("/repos/")[1] ?? "",
-  }))
+  const prs = await Promise.all(
+    json.items.slice(0, 12).map(async (it) => {
+      const repoUrl = it.repository_url ?? ""
+      const prUrl = it.pull_request?.url ?? `${repoUrl}/pulls/${it.number}`
+      const { adds, dels } = await fetchDiff(prUrl, token)
+      return {
+        num: it.number,
+        title: it.title ?? "",
+        repo: repoUrl.split("/repos/")[1] ?? "",
+        author: it.user?.login ?? "",
+        adds,
+        dels,
+      }
+    }),
+  )
   return { prs, count: json.total_count }
 }
 
@@ -62,7 +99,10 @@ function luaStr(s: string): string {
 
 function renderApp(prs: PR[], count: number, beep: boolean): string {
   const items = prs
-    .map((p) => `{n=${p.num},t=${luaStr(p.title)},r=${luaStr(p.repo)}}`)
+    .map(
+      (p) =>
+        `{n=${p.num},t=${luaStr(p.title)},r=${luaStr(p.repo)},a=${luaStr(p.author)},adds=${p.adds},dels=${p.dels}}`,
+    )
     .join(",")
   const header =
     `PR_DATA = {${items}}\n` +
