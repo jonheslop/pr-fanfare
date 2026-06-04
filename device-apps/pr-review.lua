@@ -24,9 +24,23 @@ local NOTE_LEN = 95                  -- ms each note rings
 local fanfare_t                      -- elapsed ms while playing, nil when idle
 local fanfare_i = 0                  -- notes sounded so far
 
+-- M5Unified's Speaker keeps the I2S amplifier powered after a tone ends, and an
+-- idle amp hisses faintly. We silence it by calling buzzer.stop() a short moment
+-- after the last note stops ringing. `clock` accumulates in on_tick; `quiet_at`
+-- is when to cut the amp (nil = nothing pending, amp already quiet).
+local clock = 0
+local quiet_at
+local QUIET_GUARD = 60 -- ms of slack after a note before we stop the amp
+
+-- Beep, then (re)arm the silence timer for when this note will have finished.
+local function sound(freq, len)
+  buzzer.beep(freq, len)
+  quiet_at = clock + len + QUIET_GUARD
+end
+
 local function start_fanfare()
   fanfare_t = 0
-  buzzer.beep(FANFARE[1], NOTE_LEN)
+  sound(FANFARE[1], NOTE_LEN)
   fanfare_i = 1
 end
 
@@ -200,13 +214,21 @@ function init(ctx)
 end
 
 function on_tick(ctx, dt_ms)
+  clock = clock + dt_ms
+  -- Once the last note has finished ringing, power the amp down so it stops
+  -- hissing. Runs every tick, independent of whether a fanfare is playing.
+  if quiet_at and clock >= quiet_at then
+    buzzer.stop()
+    quiet_at = nil
+  end
+
   if not fanfare_t then return end
   fanfare_t = fanfare_t + dt_ms
   -- note N starts once elapsed time crosses (N-1)*NOTE_GAP
   local want = math.floor(fanfare_t / NOTE_GAP) + 1
   while fanfare_i < want and fanfare_i < #FANFARE do
     fanfare_i = fanfare_i + 1
-    buzzer.beep(FANFARE[fanfare_i], NOTE_LEN)
+    sound(FANFARE[fanfare_i], NOTE_LEN)
   end
   if fanfare_i >= #FANFARE then
     fanfare_t = nil
@@ -222,7 +244,7 @@ function on_event(ctx, e)
       else
         cur = (cur - 2) % n + 1
       end
-      buzzer.beep(660, 40)
+      sound(660, 40)
       draw()
     end
   end
