@@ -52,6 +52,7 @@ function sinceDate(days: number): string {
 async function fetchReviewQueue(token: string): Promise<{ prs: PR[]; count: number }> {
   const q =
     "is:open is:pull-request review-requested:@me archived:false " +
+    "draft:false " +
     "-label:platform " +
     `created:>=${sinceDate(MAX_AGE_DAYS)}`
   const url =
