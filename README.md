@@ -4,7 +4,7 @@ Turns the M5StickS3 into a physical indicator of your GitHub review queue:
 shows how many PRs are waiting on your review, lets you cycle through them with
 the buttons, and **beeps when a new one arrives**.
 
-[![A picture of the Stick in action](https://imagedelivery.net/tfgleCjJafHVtd2F4ngDnQ/ed6edc2e-74e2-4ad9-7629-4ac194f56800/medium)](https://imagedelivery.net/tfgleCjJafHVtd2F4ngDnQ/ed6edc2e-74e2-4ad9-7629-4ac194f56800/large)
+[![A picture of the Stick in action](https://imagedelivery.net/tfgleCjJafHVtd2F4ngDnQ/bfb17bb8-3996-4694-5624-d6be15423200/large)
 
 ## How it works
 
